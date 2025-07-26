@@ -1,6 +1,11 @@
-import asyncio
+import os
+import signal
+import threading
+import time
 import logging
 import requests
+import asyncio
+from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -14,10 +19,11 @@ from telegram.ext import (
 from datetime import datetime
 
 # ===== CONFIGURATION =====
-TOKEN = "8423656357:AAGQYh32Gk-ItGFcFxhd25-hAOxjXT2qQd8"  # Replace with your bot token
-ADMIN_ID = "7468096294"  # Replace with your Telegram ID
+TOKEN = os.getenv("TOKEN", "8423656357:AAGQYh32Gk-ItGFcFxhd25-hAOxjXT2qQd8")
+ADMIN_ID = os.getenv("ADMIN_ID", "7468096294")
 API_URL = "https://smmtrustpanel.com/api/v2"
-API_KEY = "83c0cf2baddad52503fa7f0e9f81884b"  # Replace with your panel API key
+API_KEY = os.getenv("API_KEY", "83c0cf2baddad52503fa7f0e9f81884b")
+PORT = int(os.getenv("PORT", 10000))  # Render provides this automatically
 
 # ===== CRYPTO ADDRESSES =====
 CRYPTO_ADDRESSES = {
@@ -104,6 +110,29 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ===== HEALTH CHECK SERVER =====
+web_app = Flask(__name__)
+
+@web_app.route('/')
+def health_check():
+    """Endpoint to keep Render instance alive"""
+    return "Øzmain Bot is running", 200
+
+def run_web_server():
+    """Run Flask server in separate thread"""
+    web_app.run(host='0.0.0.0', port=PORT)
+
+# ===== KEEPALIVE MECHANISM =====
+def send_keepalive():
+    """Ping ourselves every 10 minutes to prevent sleep"""
+    while True:
+        try:
+            requests.get(f"http://localhost:{PORT}", timeout=5)
+            time.sleep(600)  # 10 minutes
+        except Exception as e:
+            logger.warning(f"Keepalive ping failed: {str(e)}")
+            time.sleep(60)
+
 # ===== MAIN MENU =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -112,7 +141,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reg_date = datetime.now().strftime("%Y/%m/%d")
         USERS[user_id] = {"balance": 0.0, "orders": [], "registration_date": reg_date}
     
-    # Create NitroSeen-style main menu buttons
     buttons = [
         [InlineKeyboardButton("👁 Views", callback_data="service_Telegram Views")],
         [InlineKeyboardButton("👍 Reactions", callback_data="service_Telegram Reactions")],
@@ -130,7 +158,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ]
 
-    # Full introduction only for /start
     await update.message.reply_text(
         "Hi, welcome to Øzmain ✋\n\n"
         "With Øzmain it's just a few taps to increase number of views, "
@@ -278,7 +305,7 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "link": link,
             "quantity": quantity
         }
-        response = requests.get(API_URL, params=params).json()
+        response = requests.get(API_URL, params=params, timeout=10).json()
         
         # Save order
         order_id = response["order"]
@@ -418,6 +445,9 @@ async def confirm_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
+    # IMMEDIATE VISUAL FEEDBACK (CRITICAL FIX)
+    await query.edit_message_text("⏳ Processing your deposit request...")
+    
     user_id = query.from_user.id
     method = context.user_data["deposit_method"]
     amount = context.user_data["deposit_amount"]
@@ -457,17 +487,18 @@ async def confirm_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     # Notify user
-    await query.edit_message_text(
-        f"⏳ *Deposit Submitted*\n\n"
+    await query.message.reply_text(
+        f"⏳ *Deposit Submitted!*\n\n"
         f"Your deposit of ${amount:.2f} in {method} has been submitted.\n"
         f"🆔 Deposit ID: `{deposit_id}`\n\n"
         f"Administrator approval is required. "
         f"You'll be notified when your balance is updated.",
-        parse_mode="Markdown"
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="force_main_menu")]
+        ])
     )
     
-    # Return to main menu
-    await force_main_menu(update, context)
     return ConversationHandler.END
 
 # ===== MY ACCOUNT =====
@@ -513,19 +544,24 @@ async def show_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     orders = user_data.get("orders", [])
     
     if not orders:
-        message = "📭 You have no orders yet."
-    else:
-        message = "📋 *Your Last 5 Orders*\n\n"
-        for order in orders[-5:]:  # Show last 5 orders
-            status_icon = "✅" if order.get("status") == "Completed" else "⏳"
-            message += (
-                f"{status_icon} *{order['service']}*\n"
-                f"🆔 ID: {order['id']}\n"
-                f"🔢 Qty: {order['quantity']} | 💵 ${order['price']:.4f}\n"
-                f"📊 Status: {order.get('status', 'Processing')}\n\n"
-            )
+        await query.edit_message_text(
+            "📭 You have no orders yet.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🏠 Main Menu", callback_data="force_main_menu")]
+            ])
+        )
+        return
     
-    # Always show main menu button
+    message = "📋 *Your Last 5 Orders*\n\n"
+    for order in orders[-5:]:
+        status_icon = "✅" if order.get("status") == "Completed" else "⏳"
+        message += (
+            f"{status_icon} *{order['service']}*\n"
+            f"🆔 ID: {order['id']}\n"
+            f"🔢 Qty: {order['quantity']} | 💵 ${order['price']:.4f}\n"
+            f"📊 Status: {order.get('status', 'Processing')}\n\n"
+        )
+    
     await query.edit_message_text(
         message, 
         parse_mode="Markdown",
@@ -653,10 +689,6 @@ async def force_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if query:
         await query.answer()
-        try:
-            await query.delete_message()
-        except:
-            pass
         chat_id = query.message.chat_id
     else:
         chat_id = update.message.chat_id
@@ -667,7 +699,6 @@ async def force_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reg_date = datetime.now().strftime("%Y/%m/%d")
         USERS[user_id] = {"balance": 0.0, "orders": [], "registration_date": reg_date}
     
-    # NitroSeen-style button layout
     buttons = [
         [InlineKeyboardButton("👁 Views", callback_data="service_Telegram Views")],
         [InlineKeyboardButton("👍 Reactions", callback_data="service_Telegram Reactions")],
@@ -685,7 +716,6 @@ async def force_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ]
 
-    # Show return message
     await context.bot.send_message(
         chat_id=chat_id,
         text="⬅️ We are back to the main menu, what can I do for you?",
@@ -707,17 +737,27 @@ async def cancel_operation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await force_main_menu(update, context)
     return ConversationHandler.END
 
+# ===== GRACEFUL SHUTDOWN HANDLER =====
+def handle_shutdown(signum, frame):
+    """Clean up before exiting"""
+    logger.info(f"Received shutdown signal {signum}. Stopping bot gracefully...")
+    # Add any cleanup actions here if needed
+    os._exit(0)
+
 # ===== MAIN FUNCTION =====
 def main():
-    # Create Application
+    # Start health check server
+    threading.Thread(target=run_web_server, daemon=True).start()
+    
+    # Start keepalive pinger
+    threading.Thread(target=send_keepalive, daemon=True).start()
+    
+    # Build application
     app = Application.builder().token(TOKEN).build()
     
     # Add cancel handler
     app.add_handler(CommandHandler("cancel", cancel_operation))
-    app.add_handler(CallbackQueryHandler(cancel_operation, pattern="^cancel_operation$"))
-    
-    # Add force main menu handler
-    app.add_handler(CallbackQueryHandler(force_main_menu, pattern="^force_main_menu$"))
+    app.add_handler(CallbackQueryHandler(cancel_operation, pattern="^force_main_menu$"))
     
     # Add admin command handlers
     app.add_handler(CommandHandler("add_balance", handle_admin_command))
@@ -776,8 +816,25 @@ def main():
     app.add_handler(CallbackQueryHandler(show_orders, pattern="^my_orders$"))
     app.add_handler(CallbackQueryHandler(support, pattern="^support$"))
     
-    # Run the bot
-    app.run_polling()
+    # Register shutdown signals
+    signal.signal(signal.SIGTERM, handle_shutdown)  # For Render
+    signal.signal(signal.SIGINT, handle_shutdown)   # For Ctrl+C
+    
+    # Start with conflict prevention
+    logger.info("Starting bot with conflict prevention...")
+    app.run_polling(
+        drop_pending_updates=True,
+        close_loop=False,
+        poll_interval=0.5
+    )
 
 if __name__ == "__main__":
+    # Initialize logging
+    logging.basicConfig(
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        level=logging.INFO
+    )
+    logger = logging.getLogger(__name__)
+    
+    logger.info("Starting Øzmain Bot...")
     main()
