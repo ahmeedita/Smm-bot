@@ -19,10 +19,10 @@ from telegram.ext import (
 from datetime import datetime
 
 # ===== CONFIGURATION =====
-TOKEN = os.getenv("8423656357:AAGQYh32Gk-ItGFcFxhd25-hAOxjXT2qQd8")
-ADMIN_ID = os.getenv("7468096294")
+TOKEN = "8423656357:AAGQYh32Gk-ItGFcFxhd25-hAOxjXT2qQd8"
+ADMIN_ID = "7468096294"
 API_URL = "https://smmtrustpanel.com/api/v2"
-API_KEY = os.getenv("83c0cf2baddad52503fa7f0e9f81884b")
+API_KEY = "83c0cf2baddad52503fa7f0e9f81884b"
 PORT = int(os.getenv("PORT", 10000))  # Render provides this automatically
 
 # ===== CRYPTO ADDRESSES =====
