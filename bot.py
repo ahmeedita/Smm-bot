@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import requests
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -14,7 +14,7 @@ from telegram.ext import (
 from datetime import datetime
 
 # ===== CONFIGURATION =====
-TOKEN = "8462686827:AAF0S878DtGZ3sifOL_eQMqUlSyxQK0iCKQ"  # Replace with your bot token
+TOKEN = "8423656357:AAGQYh32Gk-ItGFcFxhd25-hAOxjXT2qQd8"  # Replace with your bot token
 ADMIN_ID = "7468096294"  # Replace with your Telegram ID
 API_URL = "https://smmtrustpanel.com/api/v2"
 API_KEY = "83c0cf2baddad52503fa7f0e9f81884b"  # Replace with your panel API key
@@ -30,22 +30,72 @@ CRYPTO_ADDRESSES = {
 
 # ===== SERVICE CONFIGURATION =====
 SERVICES = {
-    "Telegram Views": {"id": 3017, "your_rate": 0.02, "min": 10, "max": 100000},
-    "Telegram Reactions": {"id": 3023, "your_rate": 0.07, "min": 100, "max": 40000},
-    "Telegram Members": {"id": 3403, "your_rate": 1.00, "min": 100, "max": 50000},
-    "Twitter Followers": {"id": 3326, "your_rate": 3.00, "min": 50, "max": 5000},
-    "Twitter Views": {"id": 2538, "your_rate": 0.10, "min": 100, "max": 100000},
-    "Twitter Likes": {"id": 2568, "your_rate": 0.50, "min": 50, "max": 50000}
+    "Telegram Views": {
+        "id": 3017,
+        "panel_rate": 0.0088,
+        "your_rate": 0.02,
+        "min": 10,
+        "max": 100000,
+        "speed": "50K/Day",
+        "guarantee": "Non-Drop"
+    },
+    "Telegram Reactions": {
+        "id": 3023,
+        "panel_rate": 0.0778,
+        "your_rate": 0.07,
+        "min": 100,
+        "max": 40000,
+        "speed": "0-2 Hours",
+        "guarantee": "Mixed Reactions"
+    },
+    "Telegram Members": {
+        "id": 3403,
+        "panel_rate": 0.5734,
+        "your_rate": 1.00,
+        "min": 100,
+        "max": 50000,
+        "speed": "50K/Day",
+        "guarantee": "365-Day Refill"
+    },
+    "Twitter Followers": {
+        "id": 3326,
+        "panel_rate": 2.6239,
+        "your_rate": 3.00,
+        "min": 50,
+        "max": 5000,
+        "speed": "5K/Day",
+        "guarantee": "30-Day Refill"
+    },
+    "Twitter Views": {
+        "id": 2538,
+        "panel_rate": 0.0292,
+        "your_rate": 0.10,
+        "min": 100,
+        "max": 100000,
+        "speed": "Instant",
+        "guarantee": "USA Targeted"
+    },
+    "Twitter Likes": {
+        "id": 2568,
+        "panel_rate": 0.1847,
+        "your_rate": 0.50,
+        "min": 50,
+        "max": 50000,
+        "speed": "0-5 Minutes",
+        "guarantee": "No Refill"
+    }
 }
 
 # ===== STATES =====
-(CHOOSING_SERVICE, INPUT_QUANTITY, INPUT_LINK, CONFIRM_ORDER,
- DEPOSIT_METHOD, DEPOSIT_AMOUNT, DEPOSIT_TXID, DEPOSIT_CONFIRM) = range(8)
+(
+    CHOOSING_SERVICE, INPUT_QUANTITY, INPUT_LINK, CONFIRM_ORDER,
+    DEPOSIT_METHOD, DEPOSIT_AMOUNT, DEPOSIT_TXID, DEPOSIT_CONFIRM
+) = range(8)
 
 # ===== DATABASE =====
-USERS = {}
-PENDING_DEPOSITS = {}
-DEPOSIT_ID_COUNTER = 1
+USERS = {}  # User data storage
+PENDING_DEPOSITS = {}  # Pending deposits
+DEPOSIT_ID_COUNTER = 1  # Auto-incrementing deposit ID
 
 # ===== LOGGING =====
 logging.basicConfig(
@@ -57,10 +107,12 @@ logger = logging.getLogger(__name__)
 # ===== MAIN MENU =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    # Initialize user if new
     if user_id not in USERS:
         reg_date = datetime.now().strftime("%Y/%m/%d")
         USERS[user_id] = {"balance": 0.0, "orders": [], "registration_date": reg_date}
     
+    # Create NitroSeen-style main menu buttons
     buttons = [
         [InlineKeyboardButton("👁 Views", callback_data="service_Telegram Views")],
         [InlineKeyboardButton("👍 Reactions", callback_data="service_Telegram Reactions")],
@@ -78,6 +130,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ]
 
+    # Full introduction only for /start
     await update.message.reply_text(
         "Hi, welcome to Øzmain ✋\n\n"
         "With Øzmain it's just a few taps to increase number of views, "
@@ -104,23 +157,29 @@ async def show_services(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     
     await query.edit_message_text(
-        "📦 Available Services\n\nSelect a service:",
-        reply_markup=InlineKeyboardMarkup(buttons)
+        "📦 *Available Services*\n\nSelect a service:",
+        reply_markup=InlineKeyboardMarkup(buttons),
+        parse_mode="Markdown"
     )
     return CHOOSING_SERVICE
 
 async def service_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    
     service_name = query.data.split("_", 1)[1]
-    service = SERVICES[service_name]
     context.user_data["service"] = service_name
+    service = SERVICES[service_name]
     
     await query.edit_message_text(
-        f"📊 {service_name}\n\n"
-        f"💵 Price: ${service['your_rate']} per 1000\n"
-        f"📦 Min: {service['min']} | Max: {service['max']}\n\n"
-        "Enter quantity:",
+        f"📊 *{service_name}*\n\n"
+        f"⚡ Speed: {service['speed']}\n"
+        f"🛡 Guarantee: {service['guarantee']}\n"
+        f"📦 Min: {service['min']} | Max: {service['max']}\n"
+        f"💵 Price: ${service['your_rate']} per 1000\n\n"
+        "✍️ *Enter quantity:*\n\n"
+        "Type /cancel to return to main menu",
+        parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 Cancel", callback_data="force_main_menu")]
         ])
@@ -142,8 +201,12 @@ async def handle_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         context.user_data["quantity"] = quantity
         await update.message.reply_text(
-            "🔗 Now send the target link\n\n"
-            "Examples:\nTelegram: https://t.me/channel/123\nTwitter: https://twitter.com/tweet/123",
+            "🔗 *Now send the target link*\n\n"
+            "Examples:\n"
+            "Telegram: https://t.me/channel/123\n"
+            "Twitter: https://twitter.com/tweet/123\n\n"
+            "Type /cancel to return to main menu",
+            parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔙 Cancel", callback_data="force_main_menu")]
             ])
@@ -170,13 +233,15 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if balance < price:
         await update.message.reply_text(
             f"❌ Insufficient balance!\n"
-            f"Needed: ${price:.4f}\nYour balance: ${balance:.4f}\n\n"
-            "Please deposit first with /deposit"
+            f"Needed: ${price:.4f}\n"
+            f"Your balance: ${balance:.4f}\n\n"
+            "Please deposit first with /deposit",
+            parse_mode="Markdown"
         )
         return ConversationHandler.END
     
     await update.message.reply_text(
-        f"✅ Order Summary\n\n"
+        f"✅ *Order Summary*\n\n"
         f"📦 Service: {service_name}\n"
         f"🔗 Link: {link}\n"
         f"📊 Quantity: {quantity}\n"
@@ -185,13 +250,15 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Confirm", callback_data="confirm_order")],
             [InlineKeyboardButton("🔙 Cancel", callback_data="force_main_menu")]
-        ])
+        ]),
+        parse_mode="Markdown"
     )
     return CONFIRM_ORDER
 
 async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    
     user_id = query.from_user.id
     service_name = context.user_data["service"]
     service = SERVICES[service_name]
@@ -211,7 +278,7 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "link": link,
             "quantity": quantity
         }
-        response = requests.get(API_URL, params=params, timeout=10).json()
+        response = requests.get(API_URL, params=params).json()
         
         # Save order
         order_id = response["order"]
@@ -223,16 +290,21 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "status": "Processing"
         })
         
+        # Show success message
         await query.edit_message_text(
-            f"🎉 Order Successful!\n\n"
+            f"🎉 *Order Successful!*\n\n"
             f"📦 Service: {service_name}\n"
             f"🆔 Order ID: {order_id}\n"
             f"💵 Charged: ${price:.4f}\n"
             f"💰 Remaining Balance: ${USERS[user_id]['balance']:.4f}\n\n"
-            "Returning to main menu..."
+            "Returning to main menu...",
+            parse_mode="Markdown"
         )
+        
+        # Return to main menu
         await force_main_menu(update, context)
     except Exception as e:
+        # Refund if failed
         USERS[user_id]["balance"] += price
         logger.error(f"Order failed: {str(e)}")
         await query.edit_message_text(
@@ -258,8 +330,10 @@ async def start_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     
     await query.edit_message_text(
-        "💎 Select Deposit Method\n\nChoose cryptocurrency:",
-        reply_markup=InlineKeyboardMarkup(buttons)
+        "💎 *Select Deposit Method*\n\n"
+        "Choose the cryptocurrency you want to use:",
+        reply_markup=InlineKeyboardMarkup(buttons),
+        parse_mode="Markdown"
     )
     return DEPOSIT_METHOD
 
@@ -279,9 +353,11 @@ async def handle_deposit_method(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data["deposit_method"] = method
     
     await query.edit_message_text(
-        f"📥 {method} Deposit Request\n\n"
-        f"💵 How much in USD? (Min: $0.5)\n\n"
-        "Example: For $10, type: 10",
+        f"📥 *{method} Deposit Request*\n\n"
+        f"💵 How much in USD do you want to deposit?\n\n"
+        f"📋 Example: To deposit $10\nType: 10\n\n"
+        f"⚠️ Minimum deposit: $0.5",
+        parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 Cancel", callback_data="force_main_menu")]
         ])
@@ -300,17 +376,19 @@ async def handle_deposit_amount(update: Update, context: ContextTypes.DEFAULT_TY
         address = CRYPTO_ADDRESSES[method]
         
         await update.message.reply_text(
-            f"🌐 {method} Deposit Address\n\n"
-            f"{address}\n\n"
-            f"💵 Send at least ${amount:.2f} worth of {method}\n\n"
-            "🔗 After sending, provide TXID or type NONE",
+            f"🌐 *{method} Deposit Address*\n\n"
+            f"`{address}`\n\n"
+            f"💵 You can send any amount but make sure it's more than minimum and it's {method}\n\n"
+            f"🔗 After sending, provide TXID\n"
+            f"❓ Can't find TXID? Type `NONE`",
+            parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔙 Cancel", callback_data="force_main_menu")]
             ])
         )
         return DEPOSIT_TXID
     except ValueError:
-        await update.message.reply_text("❗ Please enter a valid number")
+        await update.message.reply_text("❗ Please enter a valid number (e.g., 10 or 10.5)")
         return DEPOSIT_AMOUNT
 
 async def handle_deposit_txid(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -319,14 +397,16 @@ async def handle_deposit_txid(update: Update, context: ContextTypes.DEFAULT_TYPE
     method = context.user_data["deposit_method"]
     amount = context.user_data["deposit_amount"]
     
-    txid_display = txid if txid.upper() != "NONE" else "NONE"
+    # Format TXID display
+    txid_display = txid if txid.upper() != "NONE" else "NONE (Not provided)"
     
     await update.message.reply_text(
-        f"🔍 Transaction Details\n\n"
-        f"📌 TXID: {txid_display}\n"
+        f"🔍 *Transaction Details*\n\n"
+        f"📌 TXID: `{txid_display}`\n"
         f"💎 Type: {method}\n"
         f"💵 USD Amount: ${amount:.2f}\n\n"
         f"✅ Click 'Accept' to confirm",
+        parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Accept", callback_data="dep_confirm")],
             [InlineKeyboardButton("🔙 Cancel", callback_data="force_main_menu")]
@@ -337,6 +417,7 @@ async def handle_deposit_txid(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def confirm_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    
     user_id = query.from_user.id
     method = context.user_data["deposit_method"]
     amount = context.user_data["deposit_amount"]
@@ -356,22 +437,36 @@ async def confirm_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "status": "pending"
     }
     
-    # Notify admin
+    # Format TXID for message
+    txid_display = txid if txid.upper() != "NONE" else "Not provided"
+    
+    # Get username for admin notification
     username = query.from_user.username or query.from_user.full_name
+    
+    # Notify admin
     await context.bot.send_message(
         chat_id=ADMIN_ID,
-        text=f"📥 New Deposit Request\n\n"
-             f"🆔 ID: {deposit_id}\n👤 User: @{username} ({user_id})\n"
-             f"💵 Amount: ${amount:.2f}\n💎 Currency: {method}\n"
-             f"📌 TXID: {txid}\n\nApprove with: /approve_deposit {deposit_id}"
+        text=f"📥 *New Deposit Request*\n\n"
+             f"🆔 Deposit ID: `{deposit_id}`\n"
+             f"👤 User: @{username} ({user_id})\n"
+             f"💵 Amount: ${amount:.2f}\n"
+             f"💎 Currency: {method}\n"
+             f"📌 TXID: `{txid_display}`\n\n"
+             f"To approve: /approve_deposit {deposit_id}",
+        parse_mode="Markdown"
     )
     
     # Notify user
     await query.edit_message_text(
-        f"⏳ Deposit Submitted\n\n"
-        f"${amount:.2f} in {method}\n🆔 ID: {deposit_id}\n\n"
-        f"Awaiting admin approval. You'll be notified when approved."
+        f"⏳ *Deposit Submitted*\n\n"
+        f"Your deposit of ${amount:.2f} in {method} has been submitted.\n"
+        f"🆔 Deposit ID: `{deposit_id}`\n\n"
+        f"Administrator approval is required. "
+        f"You'll be notified when your balance is updated.",
+        parse_mode="Markdown"
     )
+    
+    # Return to main menu
     await force_main_menu(update, context)
     return ConversationHandler.END
 
@@ -379,47 +474,61 @@ async def confirm_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def show_my_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    
     user_id = query.from_user.id
     user_data = USERS.get(user_id)
     
     if not user_data:
-        await query.edit_message_text("❌ User not found. Use /start")
+        await query.edit_message_text("❌ User data not found. Please use /start to initialize.")
         return
     
+    # Count all orders
     num_orders = len(user_data["orders"])
+    
+    # Format account information
+    account_info = (
+        f"👤 *My Account*\n\n"
+        f"▫️ User ID: `{user_id}`\n"
+        f"▫️ Registry date: {user_data['registration_date']}\n"
+        f"▫️ Number of orders: {num_orders}\n"
+        f"▫️ Balance: ${user_data['balance']:.4f}\n\n"
+    )
+    
+    # Only provide "Main Menu" button
     await query.edit_message_text(
-        f"👤 My Account\n\n"
-        f"▫️ User ID: {user_id}\n"
-        f"▫️ Joined: {user_data['registration_date']}\n"
-        f"▫️ Orders: {num_orders}\n"
-        f"▫️ Balance: ${user_data['balance']:.4f}",
+        account_info,
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🏠 Main Menu", callback_data="force_main_menu")]
-        ])
+        ]),
+        parse_mode="Markdown"
     )
 
 # ===== ORDER HISTORY =====
 async def show_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    
     user_id = query.from_user.id
-    orders = USERS.get(user_id, {}).get("orders", [])
+    user_data = USERS.get(user_id, {})
+    orders = user_data.get("orders", [])
     
     if not orders:
-        message = "📭 No orders yet"
+        message = "📭 You have no orders yet."
     else:
-        message = "📋 Last 5 Orders\n\n"
-        for order in orders[-5:]:
+        message = "📋 *Your Last 5 Orders*\n\n"
+        for order in orders[-5:]:  # Show last 5 orders
             status_icon = "✅" if order.get("status") == "Completed" else "⏳"
             message += (
-                f"{status_icon} {order['service']}\n"
+                f"{status_icon} *{order['service']}*\n"
                 f"🆔 ID: {order['id']}\n"
                 f"🔢 Qty: {order['quantity']} | 💵 ${order['price']:.4f}\n"
                 f"📊 Status: {order.get('status', 'Processing')}\n\n"
             )
     
+    # Always show main menu button
     await query.edit_message_text(
-        message,
+        message, 
+        parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🏠 Main Menu", callback_data="force_main_menu")]
         ])
@@ -429,12 +538,17 @@ async def show_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def support(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    
+    # Send support message
     await query.edit_message_text(
-        "🔰 Support\n\n"
-        "Contact our team for help:\n"
-        "@DVMAJ\n\n"
-        "Returning to main menu in 5 seconds..."
+        "🔰 *Support*\n\n"
+        "Please feel free to reach out to our support team, "
+        "if you have any questions or issues.\n\n"
+        "@DVMAJ",
+        parse_mode="Markdown"
     )
+    
+    # Automatically return to main menu after 5 seconds
     await asyncio.sleep(5)
     await force_main_menu(update, context)
     return ConversationHandler.END
@@ -443,73 +557,117 @@ async def support(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if str(user_id) != ADMIN_ID:
-        await update.message.reply_text("❌ Admin only")
+        await update.message.reply_text("❌ Unauthorized access. This incident will be reported.")
         return
     
     command = update.message.text.split()[0]
     
     if command == "/add_balance":
+        if len(context.args) < 2:
+            await update.message.reply_text("Usage: /add_balance <user_id> <amount>")
+            return
+        
         try:
-            target_id = int(context.args[0])
+            target_user_id = int(context.args[0])
             amount = float(context.args[1])
-            if target_id in USERS:
-                USERS[target_id]["balance"] += amount
-                await update.message.reply_text(f"✅ Added ${amount:.2f} to user {target_id}")
-                await context.bot.send_message(
-                    target_id,
-                    f"💳 Balance +${amount:.2f}\nNew balance: ${USERS[target_id]['balance']:.2f}"
-                )
-            else:
-                await update.message.reply_text("❌ User not found")
-        except:
-            await update.message.reply_text("Usage: /add_balance USER_ID AMOUNT")
+            
+            if target_user_id not in USERS:
+                await update.message.reply_text(f"❌ User {target_user_id} not found")
+                return
+                
+            USERS[target_user_id]["balance"] += amount
+            await update.message.reply_text(f"✅ Added ${amount:.2f} to user {target_user_id}")
+            
+            # Notify user
+            await context.bot.send_message(
+                chat_id=target_user_id,
+                text=f"💳 *Balance Updated*\n\n"
+                     f"An administrator has added ${amount:.2f} to your balance.\n"
+                     f"New balance: ${USERS[target_user_id]['balance']:.2f}",
+                parse_mode="Markdown"
+            )
+            
+        except (ValueError, IndexError):
+            await update.message.reply_text("❌ Invalid arguments. Usage: /add_balance <user_id> <amount>")
     
     elif command == "/pending_deposits":
         if not PENDING_DEPOSITS:
             await update.message.reply_text("ℹ️ No pending deposits")
             return
             
-        message = "📋 Pending Deposits\n\n"
-        for dep_id, dep in PENDING_DEPOSITS.items():
-            message += f"🆔 {dep_id} | 👤 {dep['user_id']}\n💵 ${dep['amount']:.2f} {dep['currency']}\n\n"
-        await update.message.reply_text(message)
+        message = "📋 *Pending Deposits*\n\n"
+        for deposit_id, deposit in PENDING_DEPOSITS.items():
+            message += (
+                f"🆔 Deposit ID: `{deposit_id}`\n"
+                f"👤 User: {deposit['user_id']}\n"
+                f"💵 Amount: ${deposit['amount']:.2f}\n"
+                f"💎 Currency: {deposit['currency']}\n"
+                f"📌 TXID: {deposit['txid']}\n\n"
+            )
+            
+        await update.message.reply_text(message, parse_mode="Markdown")
     
     elif command == "/approve_deposit":
+        if not context.args:
+            await update.message.reply_text("Usage: /approve_deposit <deposit_id>")
+            return
+            
         try:
-            dep_id = int(context.args[0])
-            dep = PENDING_DEPOSITS.get(dep_id)
-            if dep:
-                user_id = dep["user_id"]
-                amount = dep["amount"]
-                if user_id in USERS:
-                    USERS[user_id]["balance"] += amount
-                    del PENDING_DEPOSITS[dep_id]
-                    await update.message.reply_text(f"✅ Approved deposit {dep_id}")
-                    await context.bot.send_message(
-                        user_id,
-                        f"✅ Deposit Approved\n\n${amount:.2f} added to your balance\nNew balance: ${USERS[user_id]['balance']:.2f}"
-                    )
-                else:
-                    await update.message.reply_text("❌ User not found")
-            else:
-                await update.message.reply_text("❌ Deposit not found")
-        except:
-            await update.message.reply_text("Usage: /approve_deposit DEPOSIT_ID")
+            deposit_id = int(context.args[0])
+            deposit = PENDING_DEPOSITS.get(deposit_id)
+            
+            if not deposit:
+                await update.message.reply_text(f"❌ Deposit ID {deposit_id} not found")
+                return
+                
+            user_id = deposit["user_id"]
+            amount = deposit["amount"]
+            
+            if user_id not in USERS:
+                await update.message.reply_text(f"❌ User {user_id} not found")
+                return
+                
+            # Add balance
+            USERS[user_id]["balance"] += amount
+            deposit["status"] = "approved"
+            
+            # Notify user
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"✅ *Deposit Approved*\n\n"
+                     f"Your deposit of ${amount:.2f} has been approved.\n"
+                     f"🆔 Deposit ID: `{deposit_id}`\n"
+                     f"New balance: ${USERS[user_id]['balance']:.2f}",
+                parse_mode="Markdown"
+            )
+            
+            # Remove from pending
+            del PENDING_DEPOSITS[deposit_id]
+            await update.message.reply_text(f"✅ Deposit ID {deposit_id} approved. User balance updated.")
+            
+        except ValueError:
+            await update.message.reply_text("❌ Invalid deposit ID")
 
 # ===== NAVIGATION FUNCTIONS =====
 async def force_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if query:
         await query.answer()
+        try:
+            await query.delete_message()
+        except:
+            pass
         chat_id = query.message.chat_id
     else:
         chat_id = update.message.chat_id
     
+    # Resend main menu
     user_id = update.effective_user.id
     if user_id not in USERS:
         reg_date = datetime.now().strftime("%Y/%m/%d")
         USERS[user_id] = {"balance": 0.0, "orders": [], "registration_date": reg_date}
     
+    # NitroSeen-style button layout
     buttons = [
         [InlineKeyboardButton("👁 Views", callback_data="service_Telegram Views")],
         [InlineKeyboardButton("👍 Reactions", callback_data="service_Telegram Reactions")],
@@ -527,55 +685,87 @@ async def force_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ]
 
+    # Show return message
     await context.bot.send_message(
         chat_id=chat_id,
-        text="⬅️ Back to main menu, what can I do for you?",
-        reply_markup=InlineKeyboardMarkup(buttons)
+        text="⬅️ We are back to the main menu, what can I do for you?",
+        reply_markup=InlineKeyboardMarkup(buttons),
+        parse_mode="Markdown"
     )
     return ConversationHandler.END
 
 async def cancel_operation(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.callback_query:
-        await update.callback_query.answer()
+    """Universal cancel function that returns to main menu"""
+    query = update.callback_query
+    if query:
+        await query.answer()
+        await query.edit_message_text("❌ Operation cancelled. Returning to main menu...")
+    else:
+        await update.message.reply_text("❌ Operation cancelled. Returning to main menu...")
+    
+    # Return to main menu
     await force_main_menu(update, context)
     return ConversationHandler.END
 
-# ===== MAIN FUNCTION WITH GRACEFUL SHUTDOWN =====
+# ===== MAIN FUNCTION =====
 def main():
-    # Create Application with persistent data
+    # Create Application
     app = Application.builder().token(TOKEN).build()
     
-    # Add handlers
+    # Add cancel handler
     app.add_handler(CommandHandler("cancel", cancel_operation))
-    app.add_handler(CallbackQueryHandler(cancel_operation, pattern="^force_main_menu$"))
+    app.add_handler(CallbackQueryHandler(cancel_operation, pattern="^cancel_operation$"))
     
-    # Admin commands
+    # Add force main menu handler
+    app.add_handler(CallbackQueryHandler(force_main_menu, pattern="^force_main_menu$"))
+    
+    # Add admin command handlers
     app.add_handler(CommandHandler("add_balance", handle_admin_command))
     app.add_handler(CommandHandler("pending_deposits", handle_admin_command))
     app.add_handler(CommandHandler("approve_deposit", handle_admin_command))
     
-    # Order conversation
+    # Order conversation handler
     order_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(show_services, pattern="^service_")],
         states={
             CHOOSING_SERVICE: [CallbackQueryHandler(service_selected, pattern="^service_")],
-            INPUT_QUANTITY: [MessageHandler(filters.TEXT, handle_quantity)],
-            INPUT_LINK: [MessageHandler(filters.TEXT, handle_link)],
+            INPUT_QUANTITY: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_quantity),
+                CommandHandler("cancel", cancel_operation)
+            ],
+            INPUT_LINK: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_link),
+                CommandHandler("cancel", cancel_operation)
+            ],
             CONFIRM_ORDER: [CallbackQueryHandler(confirm_order, pattern="^confirm_order$")]
         },
-        fallbacks=[CommandHandler("cancel", cancel_operation)]
+        fallbacks=[
+            CallbackQueryHandler(cancel_operation, pattern="^cancel_operation$"),
+            CallbackQueryHandler(force_main_menu, pattern="^force_main_menu$"),
+            CommandHandler("cancel", cancel_operation)
+        ]
     )
     
-    # Deposit conversation
+    # Deposit conversation handler
     deposit_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(start_deposit, pattern="^deposit$")],
         states={
             DEPOSIT_METHOD: [CallbackQueryHandler(handle_deposit_method, pattern="^dep_")],
-            DEPOSIT_AMOUNT: [MessageHandler(filters.TEXT, handle_deposit_amount)],
-            DEPOSIT_TXID: [MessageHandler(filters.TEXT, handle_deposit_txid)],
+            DEPOSIT_AMOUNT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_deposit_amount),
+                CommandHandler("cancel", cancel_operation)
+            ],
+            DEPOSIT_TXID: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_deposit_txid),
+                CommandHandler("cancel", cancel_operation)
+            ],
             DEPOSIT_CONFIRM: [CallbackQueryHandler(confirm_deposit, pattern="^dep_confirm$")]
         },
-        fallbacks=[CommandHandler("cancel", cancel_operation)]
+        fallbacks=[
+            CallbackQueryHandler(cancel_operation, pattern="^cancel_operation$"),
+            CallbackQueryHandler(force_main_menu, pattern="^force_main_menu$"),
+            CommandHandler("cancel", cancel_operation)
+        ]
     )
     
     # Main handlers
@@ -586,12 +776,8 @@ def main():
     app.add_handler(CallbackQueryHandler(show_orders, pattern="^my_orders$"))
     app.add_handler(CallbackQueryHandler(support, pattern="^support$"))
     
-    # Start the bot with graceful shutdown handling
-    app.run_polling(
-        close_loop=False,  # Important for Render
-        stop_signals=None,  # Disable default signal handling
-        allowed_updates=None  # Receive all update types
-    )
+    # Run the bot
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
